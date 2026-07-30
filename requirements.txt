@@ -1,0 +1,8 @@
+# WARDEN — local mode (self-contained, no network, no AWS account needed)
+cryptography>=42        # genuine Ed25519 for the dual-key gate (the moat)
+pytest>=7               # the acceptance suite (determinism, refusal, replay, plan-swap)
+
+# AWS mode (optional stretch — not needed for the local demo):
+#   boto3               # Bedrock / KMS / DynamoDB / S3 adapters
+#   aws-cdk-lib
+#   constructs

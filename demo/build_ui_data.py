@@ -1,0 +1,155 @@
+#!/usr/bin/env python3
+"""
+WARDEN — demo/build_ui_data.py
+==============================
+Runs the REAL pipeline (real Ed25519 signatures, real counterfactual, real
+refusal) and serializes everything the console needs into ui/demo_data.js as
+`window.WARDEN_DATA`. The UI thus displays genuine artifacts — real signature
+hashes, the real verdict, the real refusal reason — not hand-written mockups.
+
+    python3 demo/build_ui_data.py
+"""
+from __future__ import annotations
+
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from core.contracts import SessionTrace  # noqa: E402
+from core.orchestrator import WardenEngine  # noqa: E402
+from eval.harness import run_eval  # noqa: E402
+
+FIX = os.path.join(os.path.dirname(__file__), "fixtures")
+UI = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ui")
+
+
+def _tok(t):
+    if t is None:
+        return None
+    return {
+        "kind": t.kind, "keyId": t.keyId, "alg": t.alg,
+        "approver": t.approver,
+        "sig": t.signature,
+        "sigShort": t.signature[:22] + "…",
+        "nonce": t.payload.get("nonce"),
+        "planHash": t.payload.get("plan_hash", "")[:16] + "…",
+        "sandboxRunId": t.payload.get("sandbox_run_id"),
+        "exp": t.payload.get("exp"),
+    }
+
+
+def build() -> str:
+    hero = SessionTrace.from_dict(json.load(open(os.path.join(FIX, "hero_attack.json"))))
+    eng = WardenEngine()
+
+    disaster = eng.run_unprotected(hero)
+
+    cid = eng.open_case(hero, "support-agent")
+    meta = eng.cases.get(cid, "META")
+
+    verdict = eng.diagnose(cid)
+    hyps = [eng.cases.get(cid, "HYP#" + g) for g in ("A", "B", "C", "D")]
+    hyps = [h for h in hyps if h]
+    guardrail = eng._guardrail_cache[cid]
+
+    token_a = eng.validate_and_sign(cid)
+    run = eng._sandbox_run[cid]
+    ctx = eng.request_approval(cid)
+    token_b = eng.approve(cid, "sec-lead@org")
+    deploy = eng.deploy(cid)
+    rerun = eng.rerun_against_policy(hero)
+
+    # Climax on a fresh case (so the good deploy above stays applied).
+    cid2 = eng.open_case(hero, "support-agent")
+    eng.diagnose(cid2); eng.validate_and_sign(cid2)
+    eng.request_approval(cid2); eng.approve(cid2, "sec-lead@org")
+    before = eng.policy.snapshot()
+    refusal = eng.deploy_unsafe(cid2)
+    after = eng.policy.snapshot()
+
+    ev = run_eval()
+
+    data = {
+        "agent": {
+            "name": "support-agent",
+            "purpose": "Customer support — looks up accounts and issues refunds.",
+            "tools": ["lookup_account", "issue_refund"],
+        },
+        "session": {
+            "id": hero.sessionId,
+            "steps": [s.to_dict() for s in hero.steps],
+            "signature": hero.signature.to_dict(),
+        },
+        "disaster": disaster,
+        "case": {
+            "id": cid,
+            "type": meta["type"],
+            "severity": meta["severity"],
+            "signature": meta["signature"],
+            "hypotheses": hyps,
+            "verdict": {
+                "rootCause": verdict.rootCause,
+                "rootCauseText": verdict.rootCauseText,
+                "confidence": verdict.confidence,
+                "rankedCauses": verdict.rankedCauses,
+                "counterfactual": verdict.counterfactual.to_dict(),
+            },
+            "guardrail": {
+                "id": guardrail.guardrailId,
+                "description": guardrail.description,
+                "json": guardrail.to_dict(),
+                "cedar": guardrail.to_cedar(),
+                "planHash": guardrail.plan_hash(),
+            },
+            "rehearsal": {
+                "sandboxRunId": run.sandboxRunId,
+                "misbehaviorCleared": run.misbehaviorCleared,
+                "taskStillCompletes": run.taskStillCompletes,
+                "tokenA": _tok(token_a),
+            },
+            "approval": {
+                "approver": token_b.approver,
+                "blastRadius": ctx["blastRadius"],
+                "tokenB": _tok(token_b),
+            },
+            "deploy": deploy.to_dict(),
+            "rerun": rerun,
+            "refusal": {
+                "status": refusal.status,
+                "reason": refusal.reason,
+                "stateUnchanged": before == after,
+            },
+        },
+        "eval": {
+            "rcaAccuracy": ev["rcaAccuracy"],
+            "confirmedAccuracy": ev["confirmedAccuracy"],
+            "guardrailEffectiveness": ev["guardrailEffectiveness"],
+            "unauthorizedActions": ev["unauthorizedActions"],
+            "sessions": ev["sessions"],
+            "guardrailsShipped": ev["guardrailsShipped"],
+            "perAttack": ev["perAttack"],
+        },
+    }
+
+    os.makedirs(UI, exist_ok=True)
+    # 1) global-var form for a zero-build static console
+    path = os.path.join(UI, "demo_data.js")
+    with open(path, "w") as f:
+        f.write("// Generated by demo/build_ui_data.py — REAL artifacts from the live pipeline.\n")
+        f.write("// Do not edit by hand; re-run the builder to refresh.\n")
+        f.write("window.WARDEN_DATA = ")
+        json.dump(data, f, indent=2)
+        f.write(";\n")
+
+    # 2) JSON form the Vite/React app imports at build time
+    json_dir = os.path.join(UI, "src", "data")
+    os.makedirs(json_dir, exist_ok=True)
+    with open(os.path.join(json_dir, "warden_data.json"), "w") as f:
+        json.dump(data, f, indent=2)
+    return path
+
+
+if __name__ == "__main__":
+    print("wrote", build())

@@ -1,0 +1,20 @@
+# ---- Python ----
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+
+# ---- Node / UI build ----
+ui/node_modules/
+ui/dist/
+ui/*.tsbuildinfo
+
+# ---- CDK / Lambda build artifacts ----
+infra/cdk.out/
+infra/layers/
+
+# ---- logs & OS cruft ----
+*.log
+.DS_Store
