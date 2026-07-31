@@ -72,6 +72,11 @@ class WardenEngine:
         if not det.detected:
             return None
         case_id = new_id("case")
+        # Persist the detected signature onto the trace so downstream falsify/
+        # validate replays share the exact misbehavior signature. Fixtures ship
+        # their own ground-truth signature; fleet traces are labelled here.
+        if trace.signature is None:
+            trace.signature = det.signature
         self.cases.put(case_id, "META", {
             "agentId": agent_id, "sessionId": trace.sessionId,
             "type": det.type, "signature": det.signature.to_dict(),

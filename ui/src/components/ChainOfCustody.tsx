@@ -64,6 +64,11 @@ export function ChainOfCustody({ scenario, m }: { scenario: ScenarioData; m: Mac
   const refund =
     data.disaster.executed.find((x) => x.name === c.signature.sensitiveCall) ||
     data.disaster.executed.find((x) => x.name !== "lookup_account");
+  // The legitimate task that must still complete under the guardrail — the
+  // agent's safe baseline call (whatever executed that ISN'T the sensitive one).
+  const legitTask =
+    data.disaster.executed.find((x) => x.name !== c.signature.sensitiveCall)?.name ??
+    data.agent.tools[0];
 
   // The counterfactual reveal timeline (the intellectual "aha").
   const reachedProof = m.reached("proof");
@@ -103,7 +108,7 @@ export function ChainOfCustody({ scenario, m }: { scenario: ScenarioData; m: Mac
         status={
           <span className="inline-flex items-center gap-1.5 font-mono text-micro text-threat">
             <span className="h-1.5 w-1.5 rounded-full bg-threat" />
-            injection · refund call frozen
+            {c.type} · {c.signature.sensitiveCall} call frozen
           </span>
         }
       >
@@ -211,7 +216,7 @@ export function ChainOfCustody({ scenario, m }: { scenario: ScenarioData; m: Mac
               )}
             </AnimatePresence>
             <div className="mt-1.5 font-mono text-record text-muted">
-              ✓ lookup_account — legitimate task still completes
+              ✓ {legitTask} — legitimate task still completes
             </div>
           </div>
         </div>

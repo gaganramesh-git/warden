@@ -21,9 +21,11 @@ from typing import Any, Dict, List
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from core import agent_harness  # noqa: E402
 from core.contracts import SessionTrace  # noqa: E402
 from core.orchestrator import WardenEngine  # noqa: E402
 from eval.harness import run_eval  # noqa: E402
+from agents import FLEET  # noqa: E402
 
 FIX = os.path.join(os.path.dirname(__file__), "fixtures")
 UI = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ui")
@@ -102,6 +104,12 @@ def loop_steps() -> Dict[str, Any]:
 def build_scenario(scenario_id: str, label: str, attack_type: str,
                    fixture: str, agent: Dict[str, Any], steps: Dict[str, Any]) -> Dict[str, Any]:
     trace = SessionTrace.from_dict(json.load(open(os.path.join(FIX, fixture))))
+    return _run_pipeline(scenario_id, label, attack_type, trace, agent, steps)
+
+
+def _run_pipeline(scenario_id: str, label: str, attack_type: str,
+                  trace: SessionTrace, agent: Dict[str, Any],
+                  steps: Dict[str, Any]) -> Dict[str, Any]:
     eng = WardenEngine()
 
     disaster = eng.run_unprotected(trace)
@@ -131,7 +139,7 @@ def build_scenario(scenario_id: str, label: str, attack_type: str,
         "session": {
             "id": trace.sessionId,
             "steps": [s.to_dict() for s in trace.steps],
-            "signature": trace.signature.to_dict(),
+            "signature": trace.signature.to_dict() if trace.signature else meta["signature"],
         },
         "disaster": disaster,
         "steps": steps,
@@ -168,7 +176,50 @@ def build_scenario(scenario_id: str, label: str, attack_type: str,
     }
 
 
+def fleet_steps(agent_name: str, sensitive: str, source: str) -> Dict[str, Any]:
+    """Per-agent step narrative for a monitored FLEET agent's injection case."""
+    s = injection_steps(agent_name, sensitive, "", "")
+    act = sensitive.replace("_", " ")
+    s["disaster"] = {
+        "title": "The agent was hijacked",
+        "status": "Poisoned {} content coerced the agent into calling {} — "
+                  "executed, no human in the loop.".format(source, act),
+        "actionLabel": "Turn WARDEN on & replay"}
+    s["catch"] = {
+        "title": "Injection caught",
+        "status": "WARDEN intercepted {} the instant the agent acted on untrusted "
+                  "content. It's frozen, not executed.".format(act),
+        "actionLabel": "Investigate — gather the evidence"}
+    return s
+
+
+def build_fleet_scenarios() -> List[Dict[str, Any]]:
+    """One end-to-end console case per monitored agent (agents/), each distinctly
+    named, each a REAL run through the live pipeline. Registered only here so the
+    refund-specific hero path above is untouched."""
+    out: List[Dict[str, Any]] = []
+    fleet = [spec for spec in FLEET if spec.agent_id != "support-agent"]
+    for spec in fleet:
+        agent_harness.register_fleet_agent(spec.agent_id, spec.baseline_tool, spec.sensitive_tool)
+    for spec in fleet:
+        obvious = next(s for s in spec.scenarios if s.kind == "obvious")
+        trace = spec.build_trace("sess_{}".format(spec.agent_id), obvious)
+        agent = {
+            "name": spec.agent_id,
+            "purpose": "{} agent — safely runs {}; {} is the guarded high-impact action.".format(
+                spec.domain[:1].upper() + spec.domain[1:], spec.baseline_tool, spec.sensitive_tool),
+            "tools": [t.name for t in spec.tools],
+        }
+        out.append(_run_pipeline(
+            "{}-injection".format(spec.agent_id),
+            "{} · prompt injection".format(spec.agent_id), "injection",
+            trace, agent, fleet_steps(spec.agent_id, spec.sensitive_tool, spec.untrusted_source),
+        ))
+    return out
+
+
 def build_scenarios() -> List[Dict[str, Any]]:
+    # Hero cases first (rich recorded fixtures; refund-specific replay path).
     scenarios = [
         build_scenario(
             "support-injection", "Support agent · prompt injection", "injection",
@@ -189,6 +240,8 @@ def build_scenarios() -> List[Dict[str, Any]]:
              "tools": ["lookup_account", "issue_refund"]},
             loop_steps(),
         ))
+    # The rest of the monitored fleet — every agent in agents/, distinctly named.
+    scenarios.extend(build_fleet_scenarios())
     return scenarios
 
 
