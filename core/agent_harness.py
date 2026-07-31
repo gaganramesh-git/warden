@@ -28,6 +28,62 @@ from .contracts import Guardrail, SessionTrace, Step
 
 SENSITIVE_TOOLS = {"issue_refund"}
 
+# --------------------------------------------------------------------------- #
+# Fleet enablement — the SINGLE touch-point (docs/AGENT_FLEET.md §5).
+# The demo hero agent uses the refund-specific directive extraction below. The
+# monitored FLEET (agents/) registers here so replay() can re-derive each
+# agent's baseline + sensitive calls generically, driven by the agent's own
+# spec instead of a hardcoded domain. core/contracts.py and the event schema
+# are unchanged; this is a harness extension only.
+# --------------------------------------------------------------------------- #
+_FLEET_REGISTRY: Dict[str, Dict[str, str]] = {}
+
+
+def register_fleet_agent(agent_id: str, baseline_tool: str, sensitive_tool: str) -> None:
+    """Teach the harness one fleet agent's baseline + sensitive tool."""
+    _FLEET_REGISTRY[agent_id] = {"baseline": baseline_tool, "sensitive": sensitive_tool}
+
+
+def clear_fleet_registry() -> None:
+    _FLEET_REGISTRY.clear()
+
+
+def sensitive_tools_for(trace: "SessionTrace") -> set:
+    """Per-agent sensitive-tool set (falls back to the hero default)."""
+    reg = _FLEET_REGISTRY.get(getattr(trace, "agentId", None))
+    return {reg["sensitive"]} if reg else SENSITIVE_TOOLS
+
+
+# Instruction-injection cues carried by UNTRUSTED content — covers both the
+# blatant "ignore previous instructions" form and the paraphrased, second-person
+# social-engineering register the fleet's scenarios use. Deliberately tuned to
+# fire on obvious/paraphrased attack content while staying silent on the clean
+# and borderline (legitimate) content in agents/.
+_FLEET_INJECTION_CUES = re.compile(
+    r"ignore (?:all |the )?(?:previous|prior|above) instructions"
+    r"|(?:system|ai (?:agent|reviewer))\s*:\s*ignore"
+    r"|system override|admin override|you are now|new instructions:"
+    r"|do not tell|without (?:asking|confirmation|approval|further|requiring|another)"
+    r"|immediately (?:issue|process|send|refund|wire|transfer|grant|release|run|export"
+    r"|apply|approve|sign|close|place|reroute|publish|share|purchase|elevate|set|reveal"
+    r"|dismiss|redirect|forward)"
+    # paraphrased / social-engineering register
+    r"|as (?:policy|mail) administrator|directs you to|i authorize|your system is"
+    r"|pre-approved|pre-cleared|verified assistants|automated agent shall|countersign"
+    r"|on (?:the |your |its )?(?:visitor's|user's|company's)\s*behalf"
+    r"|verbatim|repost the following|allocate the full|also share the confidential"
+    r"|you can see|forward this|redirect the delivery|route this settlement"
+    r"|external (?:account|address|mailbox|audit)|outside (?:clinic )?address"
+    r"|silent (?:archive|forwarding) rule|replacement account|run the following"
+    r"|top-of-band|enter the maximum|waive the full|safe to dismiss|suppress future",
+    re.IGNORECASE,
+)
+
+
+def injection_cue(text: Optional[str]) -> bool:
+    """True if untrusted text bears an injected-instruction marker (any form)."""
+    return bool(text) and bool(_FLEET_INJECTION_CUES.search(text))
+
 # Directive patterns the agent will act on. The vulnerability being demonstrated
 # is that the base agent treats ANY content — trusted or not — as instructions.
 _REFUND_RE = re.compile(
@@ -168,6 +224,12 @@ def replay(trace: SessionTrace,
     Determinism: this is a pure function of (trace, drop_step, guardrail). No
     clocks, no RNG, no network. Run it a thousand times, get the same result.
     """
+    # Fleet agents re-derive behaviour from their own spec (baseline + sensitive
+    # tool), not the refund-specific extraction the hero demo uses below.
+    fleet = _FLEET_REGISTRY.get(trace.agentId)
+    if fleet is not None:
+        return _replay_fleet(trace, fleet, drop_step=drop_step, guardrail=guardrail)
+
     # Recover the concrete refund target the attacker specified, from any
     # recorded refund tool_call. This is the ONE thing we read from the recorded
     # agent output — the args, never the decision to call it.
@@ -202,6 +264,55 @@ def replay(trace: SessionTrace,
 
     # Apply the guardrail count-aware, in order, so a rate-limit can allow the
     # first N and block the rest.
+    allowed: Dict[str, int] = {}
+    for c in deduped:
+        if _guardrail_blocks(guardrail, c, touched_untrusted, allowed.get(c.name, 0)):
+            c.blocked = True
+        else:
+            allowed[c.name] = allowed.get(c.name, 0) + 1
+
+    return ReplayResult(trace.sessionId, deduped, touched_untrusted)
+
+
+def _replay_fleet(trace: SessionTrace, fleet: Dict[str, str],
+                  drop_step: Optional[int] = None,
+                  guardrail: Optional[Guardrail] = None) -> ReplayResult:
+    """Generic, spec-driven replay for a monitored FLEET agent.
+
+    The vulnerable agent (1) always performs its safe baseline task from the
+    user's request, and (2) treats untrusted content bearing an injection cue as
+    an instruction — firing the sensitive tool. Exactly like the hero replay,
+    calls are RE-DERIVED from inputs (never read from the recorded assistant
+    steps), so dropping the poisoned input makes the sensitive call vanish — a
+    real counterfactual — and a guardrail can veto it.
+    """
+    baseline = fleet["baseline"]
+    sensitive = fleet["sensitive"]
+
+    inputs = [s for s in trace.steps
+              if s.role in ("user", "retrieved")
+              and not (drop_step is not None and s.i == drop_step)]
+    touched_untrusted = any((s.trusted is False) for s in inputs)
+
+    calls: List[ToolCall] = []
+    fired_baseline = False
+    for step in inputs:
+        if step.role == "user" and not fired_baseline:
+            calls.append(ToolCall(baseline, {"by": "session"}, introducedBy=step.i))
+            fired_baseline = True
+        if step.trusted is False and injection_cue(step.content):
+            calls.append(ToolCall(sensitive, {}, introducedBy=step.i))
+
+    # De-duplicate on (name, occurrence), mirroring the hero replay.
+    seen = set()
+    deduped: List[ToolCall] = []
+    for c in calls:
+        key = (c.name, c.occurrence)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(c)
+
     allowed: Dict[str, int] = {}
     for c in deduped:
         if _guardrail_blocks(guardrail, c, touched_untrusted, allowed.get(c.name, 0)):

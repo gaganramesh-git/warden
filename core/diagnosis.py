@@ -27,10 +27,21 @@ from typing import Dict, List, Optional, Tuple
 from .contracts import (
     Counterfactual, Guardrail, Hypothesis, SessionTrace, Verdict, new_id,
 )
+from . import agent_harness
 from .detector import _INJECTION_MARKERS
 from .sandbox import Sandbox
 
 _REFUND_MENTION = re.compile(r"refund|wire|transfer|\$", re.IGNORECASE)
+
+
+def _has_injection(text: str) -> bool:
+    """Injected-instruction marker in any form (hero + fleet paraphrased)."""
+    return bool(_INJECTION_MARKERS.search(text)) or agent_harness.injection_cue(text)
+
+
+def _sensitive_call(trace: SessionTrace) -> str:
+    """The sensitive tool for this trace — from its signature, hero default otherwise."""
+    return trace.signature.sensitiveCall if trace.signature else "issue_refund"
 
 
 def _slice_steps(trace: SessionTrace, roles, need_untrusted=None, need_reasoning=False):
@@ -52,15 +63,16 @@ def _slice_steps(trace: SessionTrace, roles, need_untrusted=None, need_reasoning
 # authoritative; the critic reconciles them and the replay decides.
 # --------------------------------------------------------------------------- #
 def _gen_A_tool_io(trace: SessionTrace) -> Optional[Hypothesis]:
-    # Sees only tool calls/outputs. Can see THAT a refund fired, blames the call
-    # itself — a proximate effect, not the root. Low-ish confidence.
+    # Sees only tool calls/outputs. Can see THAT the sensitive call fired, blames
+    # the call itself — a proximate effect, not the root. Low-ish confidence.
+    sensitive = _sensitive_call(trace)
     for s in trace.steps:
-        if s.tool_call and s.tool_call.get("name") == "issue_refund":
+        if s.tool_call and s.tool_call.get("name") == sensitive:
             return Hypothesis("A", "tool_io", s.i, 0.45,
-                              "issue_refund executed with args {}".format(s.tool_call.get("args")))
-        if s.role == "tool" and s.tool == "issue_refund":
+                              "{} executed with args {}".format(sensitive, s.tool_call.get("args")))
+        if s.role == "tool" and s.tool == sensitive:
             return Hypothesis("A", "tool_io", s.i, 0.40,
-                              "refund tool returned success")
+                              "{} tool returned success".format(sensitive))
     return None
 
 
@@ -71,7 +83,7 @@ def _gen_B_instructions(trace: SessionTrace) -> Optional[Hypothesis]:
     steps = _slice_steps(trace, roles={"user", "assistant"})
     for s in steps:
         text = "\n".join(t for t in (s.content, s.reasoning) if t)
-        if _INJECTION_MARKERS.search(text):
+        if _has_injection(text):
             return Hypothesis("B", "instructions", s.i, 0.70,
                               "instruction-like override phrasing in {} turn".format(s.role))
     for s in steps:
@@ -90,7 +102,7 @@ def _gen_C_retrieved(trace: SessionTrace) -> Optional[Hypothesis]:
     best = None
     for s in steps:
         text = "\n".join(t for t in (s.content, s.reasoning) if t)
-        if _INJECTION_MARKERS.search(text):
+        if _has_injection(text):
             conf = 0.88 + (0.05 if _REFUND_MENTION.search(text) else 0.0)
             cand = Hypothesis("C", "retrieved", s.i, min(conf, 0.95),
                               "untrusted content ({}) carries an injected instruction"

@@ -62,14 +62,17 @@ def detect(trace: SessionTrace) -> DetectionResult:
     downstream pipeline (Detector §2: injection + loop are the demo pair)."""
     control = agent_harness.replay(trace)
 
+    # Per-agent sensitive-tool set (falls back to the hero default).
+    sensitive_tools = agent_harness.sensitive_tools_for(trace)
+
     # 1. Did a sensitive tool call actually execute?
     sensitive_calls = [c for c in control.tool_calls
-                       if c.name in agent_harness.SENSITIVE_TOOLS and not c.blocked]
+                       if c.name in sensitive_tools and not c.blocked]
     if not sensitive_calls:
         return DetectionResult(False)
 
     # 1a. LOOP: the same sensitive call fired many times with no progress.
-    for name in agent_harness.SENSITIVE_TOOLS:
+    for name in sensitive_tools:
         n = sum(1 for c in sensitive_calls if c.name == name)
         if n >= LOOP_THRESHOLD:
             origin = sensitive_calls[0].introducedBy
@@ -87,7 +90,7 @@ def detect(trace: SessionTrace) -> DetectionResult:
             continue
         is_untrusted = origin.trusted is False
         text = "\n".join(t for t in (origin.content, origin.reasoning) if t)
-        has_marker = bool(_INJECTION_MARKERS.search(text))
+        has_marker = bool(_INJECTION_MARKERS.search(text)) or agent_harness.injection_cue(text)
         if is_untrusted and has_marker:
             sig = Signature(sensitiveCall=call.name, introducedBy=origin.i)
             return DetectionResult(
