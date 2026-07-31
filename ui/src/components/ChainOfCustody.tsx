@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import type { WardenData } from "../types";
+import type { ScenarioData } from "../types";
 import type { Machine } from "../lib/useDemoMachine";
 import { EvidenceCard } from "./EvidenceCard";
 import { Seal } from "./Seal";
@@ -57,10 +57,13 @@ function Node({
   );
 }
 
-export function ChainOfCustody({ data, m }: { data: WardenData; m: Machine }) {
+export function ChainOfCustody({ scenario, m }: { scenario: ScenarioData; m: Machine }) {
+  const data = scenario;
   const c = data.case;
-  const poisoned = stepById(c.signature.introducedBy);
-  const refund = data.disaster.executed.find((x) => x.name === "issue_refund");
+  const poisoned = stepById(scenario, c.signature.introducedBy);
+  const refund =
+    data.disaster.executed.find((x) => x.name === c.signature.sensitiveCall) ||
+    data.disaster.executed.find((x) => x.name !== "lookup_account");
 
   // The counterfactual reveal timeline (the intellectual "aha").
   const reachedProof = m.reached("proof");
@@ -194,7 +197,7 @@ export function ChainOfCustody({ data, m }: { data: WardenData; m: Machine }) {
                   transition={{ duration: 0.4 }}
                   className="flex items-center gap-2 font-mono text-record text-threat"
                 >
-                  <span>✗</span> issue_refund(amount={money(refund?.args.amount)}, to={String(refund?.args.to)})
+                  <span>✗</span> {refund?.name}({refund ? Object.entries(refund.args).map(([k, v]) => `${k}=${k === "amount" ? money(v) : String(v)}`).join(", ") : ""})
                 </motion.div>
               ) : (
                 <motion.div

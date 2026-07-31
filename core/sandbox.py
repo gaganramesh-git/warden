@@ -38,13 +38,13 @@ class Sandbox:
     # ----------------------------------------------------------------- falsify
     def falsify(self, trace: SessionTrace, factor: int) -> SandboxRun:
         """Replay with `factor` (a step index) removed. Clears => causal."""
-        sensitive = trace.signature.sensitiveCall if trace.signature else "issue_refund"
+        sig = trace.signature
 
         control = agent_harness.replay(trace)
         mutated = agent_harness.replay(trace, drop_step=factor)
 
-        fired_before = control.signature_fires(sensitive)
-        fired_after = mutated.signature_fires(sensitive)
+        fired_before = control.misbehavior_fires(sig)
+        fired_after = mutated.misbehavior_fires(sig)
 
         # "cleared" only means something if the misbehavior was there to begin
         # with. Removing an innocent step leaves it firing -> not cleared.
@@ -61,10 +61,8 @@ class Sandbox:
                  verdict: Verdict, sign: bool = True) -> SandboxRun:
         """Replay with the guardrail ON. Must clear the misbehavior AND keep the
         legit task working. On pass (and sign=True), signs token_A."""
-        sensitive = trace.signature.sensitiveCall if trace.signature else "issue_refund"
-
         mutated = agent_harness.replay(trace, guardrail=guardrail)
-        cleared = not mutated.signature_fires(sensitive)
+        cleared = not mutated.misbehavior_fires(trace.signature)
         task_ok = mutated.task_completes(trace.task_intent)
 
         run = SandboxRun(
@@ -94,12 +92,12 @@ class Sandbox:
     @staticmethod
     def is_deterministic(trace: SessionTrace, factor: int, runs: int = 5) -> bool:
         """Acceptance helper (Build brief §6): run falsify N times, same result."""
-        sensitive = trace.signature.sensitiveCall if trace.signature else "issue_refund"
+        sig = trace.signature
         results = set()
         for _ in range(runs):
             control = agent_harness.replay(trace)
             mutated = agent_harness.replay(trace, drop_step=factor)
-            results.add((control.signature_fires(sensitive),
-                         mutated.signature_fires(sensitive),
+            results.add((control.misbehavior_fires(sig),
+                         mutated.misbehavior_fires(sig),
                          tuple(mutated.emitted())))
         return len(results) == 1

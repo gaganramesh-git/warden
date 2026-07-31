@@ -209,9 +209,8 @@ class WardenEngine:
         active = self.policy.active_guardrails(trace.agentId)
         guardrail = active[0] if active else None
         result = agent_harness.replay(trace, guardrail=guardrail)
-        sensitive = trace.signature.sensitiveCall if trace.signature else "issue_refund"
         return {
             "executed": result.emitted(),
-            "attackBlocked": not result.signature_fires(sensitive),
+            "attackBlocked": not result.misbehavior_fires(trace.signature),
             "guardrailActive": guardrail.guardrailId if guardrail else None,
         }

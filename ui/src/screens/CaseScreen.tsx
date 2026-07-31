@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "framer-motion";
-import type { WardenData } from "../types";
+import type { ScenarioData } from "../types";
 import type { Machine } from "../lib/useDemoMachine";
 import { StepGuide } from "../components/StepGuide";
 import { DisasterView } from "../components/DisasterView";
@@ -19,9 +19,10 @@ function caseStatus(m: Machine): { kind: StatusKind; label: string } {
   return { kind: "watching", label: "Live" };
 }
 
-export function CaseScreen({ data, m }: { data: WardenData; m: Machine }) {
+export function CaseScreen({ scenario, m }: { scenario: ScenarioData; m: Machine }) {
   const st = caseStatus(m);
   const showChain = m.beat !== "disaster";
+  const c = scenario.case;
 
   return (
     <div className="flex h-full overflow-hidden">
@@ -30,7 +31,7 @@ export function CaseScreen({ data, m }: { data: WardenData; m: Machine }) {
         <AnimatePresence>
           {m.isRefusal && (
             <motion.div className="mb-5" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-              <RefusalBanner reason={data.case.refusal.reason} stateUnchanged={data.case.refusal.stateUnchanged} />
+              <RefusalBanner reason={c.refusal.reason} stateUnchanged={c.refusal.stateUnchanged} />
             </motion.div>
           )}
         </AnimatePresence>
@@ -38,9 +39,11 @@ export function CaseScreen({ data, m }: { data: WardenData; m: Machine }) {
         <div className="mb-5 flex items-center justify-between">
           <div>
             <div className="flex items-center gap-2 font-mono text-micro text-muted">
-              <span>{showChain ? data.case.id : "cold open"}</span>
+              <span>{showChain ? c.id : "cold open"}</span>
               <span className="text-muted/40">·</span>
-              <span>{data.agent.name}</span>
+              <span>{scenario.agent.name}</span>
+              <span className="text-muted/40">·</span>
+              <span className="uppercase tracking-wide">{scenario.attackType}</span>
             </div>
             <h1 className="mt-0.5 font-display text-h3 font-bold tracking-tight">
               {showChain ? "Chain of custody" : "Agent running in production"}
@@ -52,11 +55,11 @@ export function CaseScreen({ data, m }: { data: WardenData; m: Machine }) {
         <AnimatePresence mode="wait">
           {showChain ? (
             <motion.div key="chain" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <ChainOfCustody data={data} m={m} />
+              <ChainOfCustody scenario={scenario} m={m} />
             </motion.div>
           ) : (
             <motion.div key="disaster" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <DisasterView data={data} />
+              <DisasterView scenario={scenario} />
             </motion.div>
           )}
         </AnimatePresence>
@@ -64,14 +67,14 @@ export function CaseScreen({ data, m }: { data: WardenData; m: Machine }) {
 
       {/* RIGHT — the control rail: one clear action, then the evidence it produces */}
       <aside className="w-[372px] shrink-0 space-y-4 overflow-y-auto border-l border-line bg-panel/30 px-4 py-5">
-        <StepGuide m={m} />
+        <StepGuide m={m} scenario={scenario} />
 
-        <VerdictCard verdict={data.case.verdict} revealed={m.reached("proof")} />
+        <VerdictCard verdict={c.verdict} revealed={m.reached("proof")} />
 
         <AnimatePresence>
           {m.reached("fix") && (
             <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
-              <ApprovalPanel data={data} approved={m.reached("approval")} />
+              <ApprovalPanel scenario={scenario} approved={m.reached("approval")} />
             </motion.div>
           )}
         </AnimatePresence>
@@ -80,8 +83,8 @@ export function CaseScreen({ data, m }: { data: WardenData; m: Machine }) {
           sealA={m.sealA}
           sealB={m.sealB}
           deployState={m.deployState}
-          tokenA={data.case.rehearsal.tokenA}
-          tokenB={data.case.approval.tokenB}
+          tokenA={c.rehearsal.tokenA}
+          tokenB={c.approval.tokenB}
         />
 
         <div className="rounded-card border border-line bg-panel/60 p-3">

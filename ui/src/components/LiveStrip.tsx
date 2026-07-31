@@ -1,15 +1,16 @@
-import type { WardenData } from "../types";
+import type { ScenarioData } from "../types";
 
 // Top-of-Fleet ticker of session events in mono (UI/UX §6).
-export function LiveStrip({ data }: { data: WardenData }) {
+export function LiveStrip({ scenario }: { scenario: ScenarioData }) {
+  const c = scenario.case;
   const evs = [
-    `session ${data.session.id} ingested · ${data.session.steps.length} steps`,
-    `⚑ INJECTION detected on ${data.agent.name} · call ${data.case.signature.sensitiveCall} frozen`,
-    `diagnosis: 4 partitions · critic ranked #${data.case.verdict.rootCause}`,
-    `counterfactual confirmed · run ${data.case.verdict.counterfactual.sandboxRunId}`,
-    `◆ rehearsal seal signed KEY_A · ${data.case.rehearsal.tokenA.sigShort}`,
-    `◆ human seal signed KEY_B · ${data.case.approval.approver}`,
-    `guardrail ${data.case.guardrail.id} deployed · rollback issued`,
+    `session ${scenario.session.id} ingested · ${scenario.session.steps.length} steps`,
+    `⚑ ${c.type.toUpperCase()} detected on ${scenario.agent.name} · call ${c.signature.sensitiveCall} frozen`,
+    `diagnosis: 4 partitions · critic ranked #${c.verdict.rootCause}`,
+    `counterfactual confirmed · run ${c.verdict.counterfactual.sandboxRunId}`,
+    `◆ rehearsal seal signed KEY_A · ${c.rehearsal.tokenA.sigShort}`,
+    `◆ human seal signed KEY_B · ${c.approval.approver}`,
+    `guardrail ${c.guardrail.id} deployed · rollback issued`,
   ];
   const line = evs.join("      •      ");
   return (
