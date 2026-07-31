@@ -1,16 +1,16 @@
-import type { WardenData } from "../types";
+import type { ScenarioData } from "../types";
 import { cx } from "../lib/cx";
 
 interface Props {
-  data: WardenData;
+  scenario: ScenarioData;
   approved: boolean;
 }
 
 // The operator's review surface: cause + counterfactual + rehearsal + the
 // guardrail diff + blast radius. The approve action lives in the StepGuide; this
 // panel shows what you're approving and the result.
-export function ApprovalPanel({ data, approved }: Props) {
-  const c = data.case;
+export function ApprovalPanel({ scenario, approved }: Props) {
+  const c = scenario.case;
   return (
     <div className="rounded-card border border-line bg-panel p-4">
       <div className="mb-3 flex items-center justify-between">
@@ -55,7 +55,7 @@ export function ApprovalPanel({ data, approved }: Props) {
         </p>
       ) : (
         <p className="mt-3 font-mono text-micro text-muted">
-          signed by <span className="text-fg">{data.case.approval.approver}</span> · human seal stamped over the same
+          signed by <span className="text-fg">{c.approval.approver}</span> · human seal stamped over the same
           plan &amp; rehearsal
         </p>
       )}

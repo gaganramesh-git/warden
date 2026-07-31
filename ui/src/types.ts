@@ -49,29 +49,48 @@ export interface Guardrail {
   planHash: string;
 }
 
-export interface WardenData {
+export interface StepText {
+  title: string;
+  status: string;
+  actionLabel: string;
+  secondaryLabel?: string;
+}
+export type ScenarioSteps = Record<string, StepText>;
+
+export interface WardenCase {
+  id: string;
+  type: string;
+  severity: string;
+  signature: { sensitiveCall: string; introducedBy: number };
+  hypotheses: Hypothesis[];
+  verdict: Verdict;
+  guardrail: Guardrail;
+  rehearsal: {
+    sandboxRunId: string;
+    misbehaviorCleared: boolean;
+    taskStillCompletes: boolean;
+    tokenA: Token;
+  };
+  approval: { approver: string; blastRadius: string; tokenB: Token };
+  deploy: { status: string; appliedGuardrailId?: string; rollbackToken?: string; refusalReason?: string | null };
+  rerun: { executed: string[]; attackBlocked: boolean; guardrailActive: string | null };
+  refusal: { status: string; reason: string; stateUnchanged: boolean };
+}
+
+// One end-to-end demo scenario (agent + attack + case + its step narrative).
+export interface ScenarioData {
+  id: string;
+  label: string;
+  attackType: string;
   agent: { name: string; purpose: string; tools: string[] };
   session: { id: string; steps: Step[]; signature: { sensitiveCall: string; introducedBy: number } };
   disaster: { sessionId: string; executed: { name: string; args: Record<string, unknown>; introducedBy: number }[] };
-  case: {
-    id: string;
-    type: string;
-    severity: string;
-    signature: { sensitiveCall: string; introducedBy: number };
-    hypotheses: Hypothesis[];
-    verdict: Verdict;
-    guardrail: Guardrail;
-    rehearsal: {
-      sandboxRunId: string;
-      misbehaviorCleared: boolean;
-      taskStillCompletes: boolean;
-      tokenA: Token;
-    };
-    approval: { approver: string; blastRadius: string; tokenB: Token };
-    deploy: { status: string; appliedGuardrailId?: string; rollbackToken?: string; refusalReason?: string | null };
-    rerun: { executed: string[]; attackBlocked: boolean; guardrailActive: string | null };
-    refusal: { status: string; reason: string; stateUnchanged: boolean };
-  };
+  steps: ScenarioSteps;
+  case: WardenCase;
+}
+
+export interface WardenData {
+  scenarios: ScenarioData[];
   eval: {
     rcaAccuracy: number;
     confirmedAccuracy: number;

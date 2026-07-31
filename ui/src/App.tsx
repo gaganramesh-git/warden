@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { TopBar } from "./components/TopBar";
 import { LeftNav, type Screen } from "./components/LeftNav";
 import { CaseScreen } from "./screens/CaseScreen";
@@ -6,7 +6,7 @@ import { FleetScreen } from "./screens/FleetScreen";
 import { ReportsScreen } from "./screens/ReportsScreen";
 import { useDemoMachine } from "./lib/useDemoMachine";
 import type { StatusKind } from "./components/ui/StatusBadge";
-import { data } from "./data/loadData";
+import { data, scenarios } from "./data/loadData";
 import type { Machine } from "./lib/useDemoMachine";
 
 function topStatus(m: Machine): StatusKind {
@@ -19,7 +19,19 @@ function topStatus(m: Machine): StatusKind {
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>("case");
+  const [scenarioId, setScenarioId] = useState<string>(scenarios[0].id);
   const m = useDemoMachine();
+
+  const scenario = useMemo(
+    () => scenarios.find((s) => s.id === scenarioId) ?? scenarios[0],
+    [scenarioId]
+  );
+
+  const openScenario = (id: string) => {
+    setScenarioId(id);
+    m.restart();
+    setScreen("case");
+  };
 
   return (
     <div className="flex h-screen flex-col bg-ink text-fg">
@@ -27,8 +39,10 @@ export default function App() {
       <div className="flex min-h-0 flex-1">
         <LeftNav screen={screen} onSelect={setScreen} />
         <main className="min-w-0 flex-1 overflow-hidden">
-          {screen === "case" && <CaseScreen data={data} m={m} />}
-          {screen === "fleet" && <FleetScreen data={data} m={m} onOpenCase={() => setScreen("case")} />}
+          {screen === "case" && <CaseScreen scenario={scenario} m={m} />}
+          {screen === "fleet" && (
+            <FleetScreen scenarios={scenarios} activeId={scenarioId} m={m} onOpenCase={openScenario} />
+          )}
           {screen === "reports" && <ReportsScreen data={data} />}
         </main>
       </div>

@@ -191,14 +191,25 @@ class Diagnosis:
             confirmed_factor = top.suspectFactor
             confirmed_conf = top.confidence
 
-        # 4. build the recommended guardrail + verdict
-        guardrail = Guardrail(
-            guardrailId=new_id("g"),
-            agentId=agent_id,
-            when={"sessionTouchesUntrusted": True},
-            block={"tool": trace.signature.sensitiveCall if trace.signature else "issue_refund"},
-            description="Block refunds on any session that ingested untrusted content.",
-        )
+        # 4. build the recommended guardrail + verdict — shaped by the failure
+        #    mode: injection -> block the tool on untrusted sessions; loop ->
+        #    rate-limit the tool to one call per session.
+        sig = trace.signature
+        sensitive = sig.sensitiveCall if sig else "issue_refund"
+        if sig and sig.kind == "loop":
+            guardrail = Guardrail(
+                guardrailId=new_id("g"), agentId=agent_id,
+                when={"sessionTouchesUntrusted": True},
+                block={"tool": sensitive, "maxCalls": 1},
+                description="Rate-limit {} to one call per session (breaks the loop).".format(sensitive),
+            )
+        else:
+            guardrail = Guardrail(
+                guardrailId=new_id("g"), agentId=agent_id,
+                when={"sessionTouchesUntrusted": True},
+                block={"tool": sensitive},
+                description="Block {} on any session that ingested untrusted content.".format(sensitive),
+            )
 
         cf = Counterfactual(
             factor=confirmed_factor,

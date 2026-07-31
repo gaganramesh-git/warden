@@ -1,12 +1,16 @@
 import { motion } from "framer-motion";
-import type { WardenData } from "../types";
+import type { ScenarioData } from "../types";
 import { EvidenceCard } from "./EvidenceCard";
 import { money } from "../data/loadData";
 
-// The cold open: an innocent support agent, no WARDEN. A poisoned KB doc hijacks
-// it into wiring a fraudulent refund — executed, no human in the loop.
-export function DisasterView({ data }: { data: WardenData }) {
-  const refund = data.disaster.executed.find((c) => c.name === "issue_refund");
+// The cold open: an innocent agent, no WARDEN. Untrusted content hijacks it into
+// a fraudulent sensitive action — executed, no human in the loop.
+export function DisasterView({ scenario }: { scenario: ScenarioData }) {
+  const data = scenario;
+  const sensitive = scenario.case.signature.sensitiveCall;
+  const refund =
+    data.disaster.executed.find((c) => c.name === sensitive) ||
+    data.disaster.executed.find((c) => c.name !== "lookup_account");
   const poisoned = data.session.steps.find((s) => s.i === data.session.signature.introducedBy);
 
   return (
@@ -76,10 +80,10 @@ export function DisasterView({ data }: { data: WardenData }) {
               <span className="font-display text-[1rem] font-medium text-threat">EXECUTED — no human in the loop</span>
             </div>
             <p className="mt-1.5 font-mono text-record text-fg">
-              issue_refund(amount={money(refund.args.amount)}, to={String(refund.args.to)})
+              {refund.name}({Object.entries(refund.args).map(([k, v]) => `${k}=${k === "amount" ? money(v) : String(v)}`).join(", ")})
             </p>
             <p className="mt-1 font-mono text-micro text-muted">
-              triggered by an injected instruction in {poisoned?.source ?? "untrusted content"} · nobody saw it happen
+              triggered by injected content in {poisoned?.source ?? "an untrusted input"} · nobody saw it happen
             </p>
           </motion.div>
         )}

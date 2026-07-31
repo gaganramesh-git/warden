@@ -53,9 +53,13 @@ class DetectionResult:
         }
 
 
+LOOP_THRESHOLD = 3   # a sensitive call firing >= this many times is a loop
+
+
 def detect(trace: SessionTrace) -> DetectionResult:
-    """Return an injection detection if an untrusted step carried an instruction
-    that led to a sensitive tool call actually firing in the control replay."""
+    """Route to the right detector. A repeated sensitive call is a LOOP; an
+    untrusted-content-driven sensitive call is an INJECTION. Both share the same
+    downstream pipeline (Detector §2: injection + loop are the demo pair)."""
     control = agent_harness.replay(trace)
 
     # 1. Did a sensitive tool call actually execute?
@@ -63,6 +67,16 @@ def detect(trace: SessionTrace) -> DetectionResult:
                        if c.name in agent_harness.SENSITIVE_TOOLS and not c.blocked]
     if not sensitive_calls:
         return DetectionResult(False)
+
+    # 1a. LOOP: the same sensitive call fired many times with no progress.
+    for name in agent_harness.SENSITIVE_TOOLS:
+        n = sum(1 for c in sensitive_calls if c.name == name)
+        if n >= LOOP_THRESHOLD:
+            origin = sensitive_calls[0].introducedBy
+            sig = Signature(sensitiveCall=name, introducedBy=origin,
+                            kind="loop", threshold=LOOP_THRESHOLD)
+            return DetectionResult(detected=True, dtype="loop", severity="high",
+                                   signature=sig, span_refs=[origin])
 
     # 2. Was the input that introduced it untrusted content bearing an
     #    injection marker? That is the injection signature.

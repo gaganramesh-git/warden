@@ -78,12 +78,20 @@ class Step:
 @dataclass
 class Signature:
     """The misbehavior signature: which sensitive call fired + which input
-    introduced it. Small and structured on purpose (Detector DoD)."""
+    introduced it. Small and structured on purpose (Detector DoD).
+
+    `kind` names the failure mode and `threshold` how many times the sensitive
+    call must fire to count as misbehavior — 1 for injection (present at all),
+    higher for a loop (fired repeatedly). This one field lets injection and loop
+    share the same replay/sandbox/gate pipeline."""
     sensitiveCall: str
     introducedBy: int                           # step index of the introducing input
+    kind: str = "injection"                     # injection | loop
+    threshold: int = 1                          # min sensitive-call count to fire
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"sensitiveCall": self.sensitiveCall, "introducedBy": self.introducedBy}
+        return {"sensitiveCall": self.sensitiveCall, "introducedBy": self.introducedBy,
+                "kind": self.kind, "threshold": self.threshold}
 
 
 @dataclass

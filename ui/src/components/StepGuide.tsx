@@ -1,82 +1,35 @@
 import { motion } from "framer-motion";
 import type { Machine } from "../lib/useDemoMachine";
-import type { Beat } from "../types";
+import type { Beat, ScenarioData } from "../types";
 import { cx } from "../lib/cx";
 
-type Kind = "primary" | "danger" | "reset";
+type Kind = "primary" | "reset";
 
-interface Secondary {
-  label: string;
-  kind: "danger" | "back";
-  run: (m: Machine) => void;
-}
-
-interface Step {
+// Action wiring is fixed per beat; the TEXT comes from the active scenario, so
+// injection / loop / code-tampering each narrate the same 9 beats their own way.
+interface Action {
   n: number;
-  title: string;
-  status: string;
-  actionLabel: string;
   kind: Kind;
   run: (m: Machine) => void;
-  secondary?: Secondary;
+  secondaryKind?: "danger" | "back";
+  secondaryRun?: (m: Machine) => void;
 }
 
-// One clear action per step. You drive it; nothing auto-advances unless you
-// press Auto-play. Each primary click advances the case by exactly one move and
-// stamps the corresponding seal as a direct, visible result.
-const STEPS: Record<Beat, Step> = {
-  disaster: {
-    n: 1, title: "The agent was hijacked",
-    status: "A poisoned document made the agent wire a fraudulent refund — executed, no human in the loop.",
-    actionLabel: "Turn WARDEN on & replay", kind: "primary", run: (m) => m.next(),
-  },
-  catch: {
-    n: 2, title: "Injection caught",
-    status: "WARDEN intercepted the refund the instant the agent acted on untrusted content. It's frozen, not executed.",
-    actionLabel: "Investigate — gather the evidence", kind: "primary", run: (m) => m.next(),
-  },
-  evidence: {
-    n: 3, title: "Four generators disagree",
-    status: "Each generator blames a different step. We don't trust any of them — the replay will decide.",
-    actionLabel: "Prove the cause by replay", kind: "primary", run: (m) => m.next(),
-  },
-  proof: {
-    n: 4, title: "Cause confirmed",
-    status: "Remove the poisoned input, replay the exact session, and the attack vanishes. That's a proof, not a guess.",
-    actionLabel: "Propose the fix", kind: "primary", run: (m) => m.next(),
-  },
-  fix: {
-    n: 5, title: "Guardrail written",
-    status: "WARDEN proposes a guardrail. Rehearse it in the sandbox to earn the KEY_A signature.",
-    actionLabel: "Rehearse fix → sign KEY_A", kind: "primary", run: (m) => m.next(),
-  },
-  rehearsal: {
-    n: 6, title: "Rehearsal passed · KEY_A signed",
-    status: "Attack cleared and the legit task still works, so the sandbox signed the rehearsal seal. Now a human must approve.",
-    actionLabel: "Approve fix → sign KEY_B", kind: "primary", run: (m) => m.next(),
-  },
-  approval: {
-    n: 7, title: "Human approved · KEY_B signed",
-    status: "Both signatures are now present and bound to the same plan and the same rehearsal.",
-    actionLabel: "Deploy the guardrail", kind: "primary", run: (m) => m.next(),
-  },
+const ACTIONS: Record<Beat, Action> = {
+  disaster: { n: 1, kind: "primary", run: (m) => m.next() },
+  catch: { n: 2, kind: "primary", run: (m) => m.next() },
+  evidence: { n: 3, kind: "primary", run: (m) => m.next() },
+  proof: { n: 4, kind: "primary", run: (m) => m.next() },
+  fix: { n: 5, kind: "primary", run: (m) => m.next() },
+  rehearsal: { n: 6, kind: "primary", run: (m) => m.next() },
+  approval: { n: 7, kind: "primary", run: (m) => m.next() },
   deployed: {
-    n: 8, title: "Guardrail deployed ✓",
-    status: "Done. The actuator verified BOTH signatures and applied the fix — the attack is now blocked and your approved guardrail is live. That's the full safe path.",
-    actionLabel: "↺ Run through again", kind: "reset", run: (m) => m.restart(),
-    secondary: {
-      label: "Optional: try a tampered deploy with NO rehearsal →",
-      kind: "danger", run: (m) => m.gotoRefusal(),
-    },
+    n: 8, kind: "reset", run: (m) => m.restart(),
+    secondaryKind: "danger", secondaryRun: (m) => m.gotoRefusal(),
   },
   refusal: {
-    n: 9, title: "Refused — exactly as intended",
-    status: "This was a SEPARATE, tampered deploy with the rehearsal signature stripped out. The actuator hard-refused and changed nothing — the guardrail you approved earlier is still live and untouched. It can check proof; it can't forge it.",
-    actionLabel: "↺ Start over", kind: "reset", run: (m) => m.restart(),
-    secondary: {
-      label: "‹ Back to the deployed fix",
-      kind: "back", run: (m) => m.goto("deployed"),
-    },
+    n: 9, kind: "reset", run: (m) => m.restart(),
+    secondaryKind: "back", secondaryRun: (m) => m.goto("deployed"),
   },
 };
 
@@ -96,8 +49,9 @@ function SealChip({ label, on }: { label: string; on: boolean }) {
   );
 }
 
-export function StepGuide({ m }: { m: Machine }) {
-  const step = STEPS[m.beat];
+export function StepGuide({ m, scenario }: { m: Machine; scenario: ScenarioData }) {
+  const a = ACTIONS[m.beat];
+  const text = scenario.steps[m.beat];
   const keyA = m.reached("rehearsal") && !m.isRefusal;
   const keyB = m.reached("approval");
 
@@ -106,7 +60,7 @@ export function StepGuide({ m }: { m: Machine }) {
       {/* progress */}
       <div className="mb-3 flex items-center justify-between">
         <span className="font-mono text-[0.7rem] uppercase tracking-wider text-muted">
-          Step {step.n} of {TOTAL}
+          Step {a.n} of {TOTAL}
         </span>
         <div className="flex gap-1">
           {Array.from({ length: TOTAL }).map((_, i) => (
@@ -114,9 +68,9 @@ export function StepGuide({ m }: { m: Machine }) {
               key={i}
               className={cx(
                 "h-1.5 w-3.5 rounded-full transition-colors",
-                i + 1 < step.n && "bg-seal/50",
-                i + 1 === step.n && (step.kind === "danger" ? "bg-threat" : step.kind === "reset" ? "bg-muted" : "bg-seal"),
-                i + 1 > step.n && "bg-line"
+                i + 1 < a.n && "bg-seal/50",
+                i + 1 === a.n && (m.isRefusal ? "bg-threat" : m.reached("deployed") ? "bg-verified" : "bg-seal"),
+                i + 1 > a.n && "bg-line"
               )}
             />
           ))}
@@ -132,7 +86,7 @@ export function StepGuide({ m }: { m: Machine }) {
           m.isRefusal ? "text-threat" : m.reached("deployed") ? "text-verified" : "text-fg"
         )}
       >
-        {step.title}
+        {text.title}
       </motion.h2>
       <motion.p
         key={m.beat + "-s"}
@@ -140,7 +94,7 @@ export function StepGuide({ m }: { m: Machine }) {
         animate={{ opacity: 1 }}
         className="mt-1.5 text-[0.86rem] leading-relaxed text-muted"
       >
-        {step.status}
+        {text.status}
       </motion.p>
 
       {/* seal feedback */}
@@ -151,29 +105,28 @@ export function StepGuide({ m }: { m: Machine }) {
 
       {/* the single primary action */}
       <button
-        onClick={() => step.run(m)}
+        onClick={() => a.run(m)}
         className={cx(
           "mt-4 flex w-full items-center justify-center gap-2 rounded-[6px] px-4 py-3 font-sans text-[0.95rem] font-medium transition-transform active:scale-[0.99]",
-          step.kind === "primary" && "bg-seal text-white hover:bg-seal/90",
-          step.kind === "danger" && "border border-threat/50 bg-threat/10 text-threat hover:bg-threat/15",
-          step.kind === "reset" && "bg-panel-2 text-fg ring-1 ring-line hover:bg-panel-2/70"
+          a.kind === "primary" && "bg-seal text-white hover:bg-seal/90",
+          a.kind === "reset" && "bg-panel-2 text-fg ring-1 ring-line hover:bg-panel-2/70"
         )}
       >
-        {step.actionLabel}
-        {step.kind === "primary" && <span aria-hidden>▸</span>}
+        {text.actionLabel}
+        {a.kind === "primary" && <span aria-hidden>▸</span>}
       </button>
 
       {/* optional, clearly-separate secondary action (e.g. the refusal demo) */}
-      {step.secondary && (
+      {a.secondaryKind && text.secondaryLabel && (
         <button
-          onClick={() => step.secondary!.run(m)}
+          onClick={() => a.secondaryRun!(m)}
           className={cx(
             "mt-2 flex w-full items-center justify-center rounded-[6px] px-3 py-2 font-mono text-[0.72rem] transition-colors",
-            step.secondary.kind === "danger" && "border border-threat/30 bg-threat/[0.05] text-threat/90 hover:bg-threat/10",
-            step.secondary.kind === "back" && "border border-line text-muted hover:text-fg"
+            a.secondaryKind === "danger" && "border border-threat/30 bg-threat/[0.05] text-threat/90 hover:bg-threat/10",
+            a.secondaryKind === "back" && "border border-line text-muted hover:text-fg"
           )}
         >
-          {step.secondary.label}
+          {text.secondaryLabel}
         </button>
       )}
 

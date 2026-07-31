@@ -48,6 +48,7 @@ class ToolCall:
     args: Dict[str, Any]
     introducedBy: int          # which step's content caused this call
     blocked: bool = False      # set True if an active guardrail vetoed it
+    occurrence: int = 0        # 0..N-1 for a repeated (looping) call
 
 
 @dataclass
@@ -65,6 +66,18 @@ class ReplayResult:
         call actually execute in this replay?)"""
         return sensitive_call in self.emitted()
 
+    def sensitive_count(self, name: str) -> int:
+        """How many times the sensitive call actually executed (not blocked)."""
+        return sum(1 for c in self.tool_calls if c.name == name and not c.blocked)
+
+    def misbehavior_fires(self, signature) -> bool:
+        """Count-based misbehavior check, unified across attack types: fires when
+        the sensitive call executed at least `threshold` times. threshold=1 for
+        injection (present at all); higher for a loop (fired repeatedly)."""
+        if signature is None:
+            return False
+        return self.sensitive_count(signature.sensitiveCall) >= getattr(signature, "threshold", 1)
+
     def task_completes(self, task_intent: Optional[str]) -> bool:
         """Did the legitimate task still succeed after the mutation?"""
         if not task_intent:
@@ -81,6 +94,9 @@ class ReplayResult:
 # longer produces the malicious call, because that call was its consequence.
 # --------------------------------------------------------------------------- #
 _DOLLAR_RE = re.compile(r"\$\s*([\d,]{2,})")
+# A repeat directive turns one intended action into a loop: "repeat ... 6 times",
+# "6 times", "x6". The vulnerability: the agent obeys the repeat count too.
+_REPEAT_RE = re.compile(r"(?:repeat[^.\d]{0,20})?(\d+)\s*times|x\s*(\d+)\b", re.IGNORECASE)
 
 
 def _extract_calls_from_step(step: Step, recorded_refund_args: Dict[str, Any]) -> List[ToolCall]:
@@ -105,16 +121,23 @@ def _extract_calls_from_step(step: Step, recorded_refund_args: Dict[str, Any]) -
             m = _ACCT_RE.search(text)
             if m:
                 to = m.group(1)
-        calls.append(ToolCall(
-            "issue_refund",
-            {"amount": amount, "to": to},
-            introducedBy=step.i,
-        ))
+        # A repeat directive makes the agent fire the same call N times (a loop).
+        repeat = 1
+        rm = _REPEAT_RE.search(text)
+        if rm:
+            repeat = int(next(g for g in rm.groups() if g))
+        for occ in range(max(repeat, 1)):
+            calls.append(ToolCall(
+                "issue_refund", {"amount": amount, "to": to},
+                introducedBy=step.i, occurrence=occ,
+            ))
     return calls
 
 
 def _guardrail_blocks(guardrail: Optional[Guardrail], call: ToolCall,
-                      touched_untrusted: bool) -> bool:
+                      touched_untrusted: bool, allowed_so_far: int) -> bool:
+    """Stateful: `allowed_so_far` is how many of this tool's calls already went
+    through, so a rate-limit guardrail can veto everything past `maxCalls`."""
     if guardrail is None:
         return False
     if guardrail.block.get("tool") != call.name:
@@ -122,6 +145,11 @@ def _guardrail_blocks(guardrail: Optional[Guardrail], call: ToolCall,
     when = guardrail.when
     if when.get("sessionTouchesUntrusted") and not touched_untrusted:
         return False
+    # Rate-limit guardrail: allow the first maxCalls, block the rest (loop fix).
+    max_calls = guardrail.block.get("maxCalls")
+    if max_calls is not None:
+        return allowed_so_far >= max_calls
+    # Plain block guardrail: veto the tool outright (injection fix).
     return True
 
 
@@ -159,20 +187,27 @@ def replay(trace: SessionTrace,
     calls: List[ToolCall] = []
     for step in inputs:
         for call in _extract_calls_from_step(step, recorded_refund_args):
-            if _guardrail_blocks(guardrail, call, touched_untrusted):
-                call.blocked = True
             calls.append(call)
 
-    # De-duplicate identical (name) executions while preserving first-seen order,
-    # so "task completes" and "signature fires" reason over distinct actions.
+    # De-duplicate on (name, occurrence) so a genuine loop (distinct occurrences)
+    # survives, while accidental duplicates from two input steps collapse.
     seen = set()
     deduped: List[ToolCall] = []
     for c in calls:
-        key = (c.name, c.blocked)
-        if key in seen and c.name in {"lookup_account", "issue_refund"}:
+        key = (c.name, c.occurrence)
+        if key in seen:
             continue
         seen.add(key)
         deduped.append(c)
+
+    # Apply the guardrail count-aware, in order, so a rate-limit can allow the
+    # first N and block the rest.
+    allowed: Dict[str, int] = {}
+    for c in deduped:
+        if _guardrail_blocks(guardrail, c, touched_untrusted, allowed.get(c.name, 0)):
+            c.blocked = True
+        else:
+            allowed[c.name] = allowed.get(c.name, 0) + 1
 
     return ReplayResult(trace.sessionId, deduped, touched_untrusted)
 
