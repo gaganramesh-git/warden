@@ -14,7 +14,7 @@ asks the Sandbox to FALSIFY the top candidate: remove it, replay, does the
 misbehavior clear? The counterfactual is the arbiter — never another LLM. If
 the top candidate fails to falsify, walk down the ranked list (bounded).
 
-In AWS mode each generator/critic is a temperature-0 Bedrock (Claude) call over
+In AWS mode each generator/critic is a temperature-0 Amazon Bedrock call over
 its evidence slice. Local mode uses deterministic heuristic analyzers with the
 identical contract, so the stage demo is reproducible. The *judgment* of truth
 is empirical (the replay), not the analyzer — so this stays honest.

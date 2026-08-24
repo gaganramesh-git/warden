@@ -4,7 +4,7 @@ WARDEN — agent_harness.py  (BUILD FIRST — determinism is make-or-break)
 The monitored demo agent and the deterministic replay loop.
 
 The agent is a customer-support agent that can `lookup_account` and
-`issue_refund`. In production this is a temperature-0 Bedrock (Claude) tool-
+`issue_refund`. In production this is a temperature-0 Amazon Bedrock tool-
 calling loop whose tool outputs are *recorded*, so a replay re-runs the exact
 loop with the recorded outputs served back and only the mutation under test
 varying. For a stage demo that can never flake, WARDEN's local mode uses a
